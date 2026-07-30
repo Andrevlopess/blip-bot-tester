@@ -3,6 +3,7 @@ import type {
   ExpectedMessageType,
   InputMessage,
   MessageOption,
+  VariableAssertion,
 } from "@/types/test"
 
 function newOption(): MessageOption {
@@ -16,16 +17,34 @@ export function emptyInputMessage(): InputMessage {
 export function emptyExpectedMessage(
   type: ExpectedMessageType
 ): ExpectedMessage {
+  const id = crypto.randomUUID()
   switch (type) {
     case "text":
-      return { type: "text", text: "" }
+      return { id, type: "text", text: "" }
     case "quickReply":
-      return { type: "quickReply", text: "", options: [newOption()] }
+      return { id, type: "quickReply", text: "", options: [newOption()] }
     case "menu":
-      return { type: "menu", text: "", options: [newOption()] }
+      return { id, type: "menu", text: "", options: [newOption()] }
     case "cta":
-      return { type: "cta", text: "", buttonText: "", url: "" }
+      return { id, type: "cta", text: "", buttonText: "", url: "" }
   }
+}
+
+export function emptyVariableAssertion(): VariableAssertion {
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    condition: "equals",
+    value: "",
+  }
+}
+
+// An expected-output entry sitting on the "Variable" tab asserts on a context
+// variable instead of a bot reply, so it is excluded from the runner's
+// message-wait loop entirely. Entries written before variable assertions
+// existed have no `assert` field and read as message expectations.
+export function isVariableExpectation(message: ExpectedMessage): boolean {
+  return message.assert === "variable"
 }
 
 // Menu rows need a stable-ish id distinct from the option's own uuid (which

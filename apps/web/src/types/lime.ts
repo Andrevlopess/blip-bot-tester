@@ -2,7 +2,7 @@ export type LimeStatus = "success" | "failure"
 
 export interface LimeCommand<TResource = unknown> {
   id: string
-  method: "get" | "set" | "delete"
+  method: "get" | "set" | "delete" | "merge"
   uri: string
   type?: string
   resource?: TResource
@@ -17,7 +17,7 @@ export interface LimeReason {
 // answers HTTP 200 — success/failure is only distinguishable via `status`.
 export interface LimeCommandResponse<TResource = unknown> {
   id: string
-  method: "get" | "set" | "delete"
+  method: "get" | "set" | "delete" | "merge"
   status: LimeStatus
   type?: string
   resource?: TResource

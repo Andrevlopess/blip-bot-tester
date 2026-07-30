@@ -1,6 +1,7 @@
 import type { MessageScore } from "@/types/run"
 import type { ExpectedMessage } from "@/types/test"
 import { formatExpectedMessage } from "@/lib/message-format"
+import { parseMessageContent } from "@/lib/message-parse"
 
 export function normalize(text: string): string {
   return text
@@ -49,6 +50,26 @@ export function tokenSetSimilarity(a: string, b: string): number {
   return unionSize === 0 ? 1 : intersectionSize / unionSize
 }
 
+// Reduces a message (expected or actual, either shape) down to just its
+// semantically meaningful content — body text plus real option/button/url
+// values — discarding envelope noise (recipient_type, footer, section
+// titles, row ids/descriptions, key order) that both sides otherwise carry
+// for different, incidental reasons.
+function canonicalize(content: string): string {
+  const parsed = parseMessageContent(content)
+  const parts: string[] = [parsed.text]
+  if (parsed.kind === "menu" || parsed.kind === "cta") {
+    parts.push(parsed.buttonLabel)
+  }
+  if (parsed.kind === "cta") {
+    parts.push(parsed.url)
+  }
+  if (parsed.kind === "menu" || parsed.kind === "quickReply") {
+    parts.push(...parsed.options)
+  }
+  return parts.filter(Boolean).join(" ")
+}
+
 const SIMILARITY_WEIGHTS = { levenshtein: 0.5, tokenSet: 0.5 } as const
 
 export function scoreMessagePair(
@@ -80,7 +101,10 @@ export function scoreStep(
     return {
       expected,
       actual,
-      score: scoreMessagePair(expected, actual),
+      score: scoreMessagePair(
+        canonicalize(expected),
+        actual === null ? null : canonicalize(actual)
+      ),
       threshold: messageThreshold,
     }
   })

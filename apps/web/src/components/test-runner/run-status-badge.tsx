@@ -5,6 +5,7 @@ import {
   ClockIcon,
   AlertTriangleIcon,
   BanIcon,
+  PauseIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import type { TestRunStatus, StepRunStatus } from "@/types/run"
@@ -34,6 +35,7 @@ const CONFIG: Record<
     icon: Loader2Icon,
     spin: true,
   },
+  paused: { label: "Paused", variant: "secondary", icon: PauseIcon },
   passed: { label: "Passed", variant: "default", icon: CheckIcon },
   failed: { label: "Failed", variant: "destructive", icon: XIcon },
   timeout: { label: "Timed out", variant: "destructive", icon: ClockIcon },

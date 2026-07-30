@@ -7,8 +7,8 @@ import { useRun } from "@/store/run-context"
 import { TestListItem } from "@/components/test-builder/test-list-item"
 
 export function HomePage() {
-  const { tests, addTest, updateTest, deleteTest } = useTests()
-  const { runs, startRun } = useRun()
+  const { tests, addTest, deleteTest, duplicateTest } = useTests()
+  const { runs, startRun, isRunning } = useRun()
   const navigate = useNavigate()
   const [checkedIds, setCheckedIds] = useState<string[]>([])
 
@@ -33,7 +33,7 @@ export function HomePage() {
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
-              disabled={checkedIds.length === 0}
+              disabled={checkedIds.length === 0 || checkedIds.some(isRunning)}
               onClick={() =>
                 startRun(tests.filter((t) => checkedIds.includes(t.id)))
               }
@@ -61,8 +61,8 @@ export function HomePage() {
                 runResult={runs[test.id]}
                 checked={checkedIds.includes(test.id)}
                 onCheckedChange={toggleChecked}
-                onUpdate={(id, data) => updateTest(id, data)}
                 onDelete={deleteTest}
+                onDuplicate={duplicateTest}
               />
             ))}
           </div>

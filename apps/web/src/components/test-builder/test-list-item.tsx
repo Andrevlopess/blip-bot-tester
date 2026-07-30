@@ -2,12 +2,10 @@ import { useState } from "react"
 import { useNavigate } from "react-router"
 import {
   MoreVerticalIcon,
-  PencilIcon,
   TrashIcon,
   ExternalLinkIcon,
-  CheckIcon,
-  XIcon,
   PlayIcon,
+  CopyIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,7 +16,6 @@ import {
   CardAction,
 } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -37,6 +34,7 @@ import {
 import type { UnitTest } from "@/types/test"
 import type { TestRunResult } from "@/types/run"
 import { RunStatusBadge } from "@/components/test-runner/run-status-badge"
+import { RunControls } from "@/components/test-runner/run-controls"
 import { useRun } from "@/store/run-context"
 
 interface TestListItemProps {
@@ -44,8 +42,8 @@ interface TestListItemProps {
   runResult?: TestRunResult
   checked: boolean
   onCheckedChange: (id: string) => void
-  onUpdate: (id: string, data: { name: string }) => void
   onDelete: (id: string) => void
+  onDuplicate: (id: string) => void
 }
 
 export function TestListItem({
@@ -53,28 +51,12 @@ export function TestListItem({
   runResult,
   checked,
   onCheckedChange,
-  onUpdate,
   onDelete,
+  onDuplicate,
 }: TestListItemProps) {
   const navigate = useNavigate()
-  const { startRun } = useRun()
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(test.name)
+  const { startRun, pauseRun, resumeRun, discardRun, isRunning } = useRun()
   const [confirmDelete, setConfirmDelete] = useState(false)
-
-  const handleSave = () => {
-    if (name.trim()) {
-      onUpdate(test.id, { name: name.trim() })
-    } else {
-      setName(test.name)
-    }
-    setEditing(false)
-  }
-
-  const handleCancel = () => {
-    setName(test.name)
-    setEditing(false)
-  }
 
   return (
     <>
@@ -90,43 +72,7 @@ export function TestListItem({
                 onCheckedChange={() => onCheckedChange(test.id)}
               />
             </div>
-            {editing ? (
-              <div
-                className="flex items-center gap-1"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSave()
-                    if (e.key === "Escape") handleCancel()
-                  }}
-                  autoFocus
-                  className="h-auto border-0 px-0 font-heading text-base font-medium shadow-none focus-visible:ring-0"
-                />
-                <Button variant="ghost" size="icon-xs" onClick={handleSave}>
-                  <CheckIcon />
-                </Button>
-                <Button variant="ghost" size="icon-xs" onClick={handleCancel}>
-                  <XIcon />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1">
-                <CardTitle>{test.name}</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setEditing(true)
-                  }}
-                >
-                  <PencilIcon />
-                </Button>
-              </div>
-            )}
+            <CardTitle>{test.name}</CardTitle>
           </div>
           <CardDescription>
             {test.steps.length} step
@@ -138,6 +84,18 @@ export function TestListItem({
             onClick={(e) => e.stopPropagation()}
           >
             <RunStatusBadge status={runResult?.status} />
+            {(runResult?.status === "connecting" ||
+              runResult?.status === "running" ||
+              runResult?.status === "paused") && (
+              <RunControls
+                compact
+                status={runResult.status}
+                onRun={() => startRun([test])}
+                onPause={() => pauseRun(test.id)}
+                onResume={() => resumeRun(test.id)}
+                onDiscard={() => discardRun(test.id)}
+              />
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon-sm">
@@ -149,13 +107,16 @@ export function TestListItem({
                   <ExternalLinkIcon />
                   Open
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEditing(true)}>
-                  <PencilIcon />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => startRun([test])}>
+                <DropdownMenuItem
+                  disabled={isRunning(test.id)}
+                  onClick={() => startRun([test])}
+                >
                   <PlayIcon />
                   Run
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onDuplicate(test.id)}>
+                  <CopyIcon />
+                  Duplicate
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

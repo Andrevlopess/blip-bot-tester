@@ -1,4 +1,6 @@
+import pLimit from "p-limit"
 import type { LimeMessage, LimeSessionEnvelope } from "@/types/lime"
+import type { TestVariables } from "@/types/test"
 
 // Confirmed Lime-over-WebSocket flow (see PROMPT.md captured from a live
 // session): a throwaway guest session creates a visitor account, then an
@@ -12,11 +14,23 @@ export type DebugConnectionStatus =
 export interface BlipDebugConnectParams {
   tenant: string
   botIdentifier: string
+  // Router "Authorization" key. Only required to apply contact variables —
+  // merging /contacts needs elevated (router-level) authorization that a
+  // guest visitor session doesn't have, so that command is sent as a plain
+  // HTTP request instead of over the Lime WebSocket session. Once this app
+  // runs as a Blip plugin, requests will be authenticated automatically and
+  // this won't be needed.
+  routerKey?: string
 }
 
 export interface BlipDebugClient {
   connect(params: BlipDebugConnectParams): Promise<void>
   sendMessage(text: string): void
+  applyVariables(variables: TestVariables): Promise<void>
+  // Reads one context variable back off the tester visitor. Resolves to null
+  // when the variable is not set. The visitor identity lives inside the
+  // client, so reads happen here rather than in the runner.
+  getContextVariable(name: string): Promise<string | null>
   onMessage(cb: (text: string, raw: unknown) => void): () => void
   onStatusChange(cb: (status: DebugConnectionStatus) => void): () => void
   disconnect(): void
@@ -24,10 +38,24 @@ export interface BlipDebugClient {
 
 const CLIENT_DOMAIN = "0mn.io"
 const BOT_DOMAIN = "msging.net"
+const CRM_NODE = "postmaster@crm.msging.net"
+const CONTEXT_NODE = "postmaster@msging.net"
 const COMMAND_TIMEOUT_MS = 10000
 const SESSION_TIMEOUT_MS = 15000
+// Contact + context variables are applied concurrently; cap the in-flight
+// requests so a test with many context variables doesn't fire dozens of
+// simultaneous calls at the Commands API.
+const VARIABLE_CONCURRENCY = 10
 
 type Envelope = Record<string, unknown>
+
+// The Commands API always answers HTTP 200 — success/failure lives in
+// `status`, and `resource` carries the payload back on a successful `get`.
+interface CommandResponse {
+  status?: string
+  resource?: unknown
+  reason?: { code?: number; description?: string }
+}
 
 interface AuthOptions {
   scheme: string
@@ -165,12 +193,50 @@ function waitForCommand(
   })
 }
 
+// Posts a command straight to the Commands API (not over the Lime WebSocket
+// session) — used for anything that needs elevated (router-level)
+// authorization a guest visitor session doesn't have, e.g. writing another
+// identity's contact/context data.
+async function postCommand(
+  tenant: string,
+  routerKey: string,
+  command: Envelope,
+  failureContext: string
+): Promise<CommandResponse> {
+  let response: Response
+  try {
+    response = await fetch(`https://${tenant}.http.msging.net/commands`, {
+      method: "POST",
+      headers: {
+        Authorization: routerKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+    })
+  } catch (cause) {
+    throw new Error(`Could not reach the Commands API to ${failureContext}.`, {
+      cause,
+    })
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("The router key was rejected — check it in Settings.")
+  }
+  if (!response.ok) {
+    throw new Error(`Could not ${failureContext} (HTTP ${response.status}).`)
+  }
+  return (await response.json()) as CommandResponse
+}
+
 export function createBlipDebugClient(): BlipDebugClient {
   let ws: WebSocket | null = null
   let send: (envelope: Envelope) => void = () => {}
   let status: DebugConnectionStatus = "idle"
   let botIdentifier = ""
   let authSessionId = ""
+  let currentIdentity = ""
+  let debugTenant = ""
+  let debugRouterKey = ""
   const ownMessageIds = new Set<string>()
   const pendingCommands = new Map<string, (envelope: Envelope) => void>()
   const messageListeners = new Set<(text: string, raw: unknown) => void>()
@@ -244,8 +310,10 @@ export function createBlipDebugClient(): BlipDebugClient {
   }
 
   return {
-    async connect({ tenant, botIdentifier: bot }) {
+    async connect({ tenant, botIdentifier: bot, routerKey }) {
       botIdentifier = bot
+      debugTenant = tenant
+      debugRouterKey = routerKey ?? ""
       setStatus("connecting")
       const wsUrl = `wss://${tenant}.ws.0mn.io:443`
 
@@ -253,6 +321,7 @@ export function createBlipDebugClient(): BlipDebugClient {
         // --- Phase 1: throwaway guest session, only to create the visitor account ---
         const userIdentity = `${crypto.randomUUID()}.${bot}`
         const userPassword = btoa(crypto.randomUUID())
+        currentIdentity = `${userIdentity}@${CLIENT_DOMAIN}`
 
         let onAccountCreated: ((envelope: Envelope) => void) | null = null
         const guest = await openSession(
@@ -356,6 +425,132 @@ export function createBlipDebugClient(): BlipDebugClient {
         type: "text/plain",
         content: text,
       })
+    },
+
+    async applyVariables(variables: TestVariables) {
+      if (!ws || status !== "open") {
+        throw new Error("Cannot apply variables — debug session is not open.")
+      }
+
+      const { contact, context } = variables
+      const extras = Object.fromEntries(
+        contact.extras
+          .filter((pair) => pair.key.trim())
+          .map((pair) => [pair.key, pair.value])
+      )
+      const hasContactData = Boolean(
+        contact.name ||
+        contact.phoneNumber ||
+        contact.taxDocument ||
+        Object.keys(extras).length > 0
+      )
+      const namedContextVariables = context.filter((v) => v.name.trim())
+
+      if (!hasContactData && namedContextVariables.length === 0) return
+      if (!debugRouterKey) {
+        throw new Error(
+          "A router key is required to apply variables — set one in Settings."
+        )
+      }
+
+      const limit = pLimit(VARIABLE_CONCURRENCY)
+      const tasks: Promise<void>[] = []
+
+      if (hasContactData) {
+        tasks.push(
+          limit(async () => {
+            const result = await postCommand(
+              debugTenant,
+              debugRouterKey,
+              {
+                id: crypto.randomUUID(),
+                to: CRM_NODE,
+                method: "merge",
+                uri: "/contacts",
+                type: "application/vnd.lime.contact+json",
+                resource: {
+                  identity: currentIdentity,
+                  ...(contact.name ? { name: contact.name } : {}),
+                  ...(contact.phoneNumber
+                    ? { phoneNumber: contact.phoneNumber }
+                    : {}),
+                  ...(contact.taxDocument
+                    ? { taxDocument: contact.taxDocument }
+                    : {}),
+                  ...(Object.keys(extras).length > 0 ? { extras } : {}),
+                },
+              },
+              "update the tester contact variables"
+            )
+            if (result.status !== "success") {
+              throw new Error("Could not update the tester contact variables.")
+            }
+          })
+        )
+      }
+
+      for (const variable of namedContextVariables) {
+        tasks.push(
+          limit(async () => {
+            const result = await postCommand(
+              debugTenant,
+              debugRouterKey,
+              {
+                id: crypto.randomUUID(),
+                // to: CONTEXT_NODE,
+                method: "set",
+                uri: `/contexts/${currentIdentity}/${variable.name}`,
+                type: "text/plain",
+                resource: variable.resource,
+              },
+              `set context variable "${variable.name}"`
+            )
+            if (result.status !== "success") {
+              throw new Error(
+                `Could not set context variable "${variable.name}".`
+              )
+            }
+          })
+        )
+      }
+
+      // `all` rejects on the first failure, matching the previous sequential
+      // behaviour of failing the run as soon as a variable can't be applied.
+      await Promise.all(tasks)
+    },
+
+    async getContextVariable(name: string) {
+      if (!ws || status !== "open") {
+        throw new Error(
+          "Cannot read a context variable — debug session is not open."
+        )
+      }
+      if (!debugRouterKey) {
+        throw new Error(
+          "A router key is required to read context variables — set one in Settings."
+        )
+      }
+
+      const result = await postCommand(
+        debugTenant,
+        debugRouterKey,
+        {
+          id: crypto.randomUUID(),
+          to: CONTEXT_NODE,
+          method: "get",
+          uri: `/contexts/${currentIdentity}/${name}`,
+        },
+        `read context variable "${name}"`
+      )
+
+      // A variable that was never set comes back as a non-success status
+      // (typically 67 / "The requested resource was not found"), which is a
+      // legitimate assertion outcome rather than a run error.
+      if (result.status !== "success") return null
+      if (result.resource === undefined || result.resource === null) return null
+      return typeof result.resource === "string"
+        ? result.resource
+        : JSON.stringify(result.resource)
     },
 
     onMessage(cb) {

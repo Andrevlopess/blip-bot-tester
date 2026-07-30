@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import {
   TrashIcon,
   PencilIcon,
@@ -9,7 +9,12 @@ import {
   GripVertical,
   ChevronDownIcon,
 } from "lucide-react"
-import { useSortable } from "@dnd-kit/sortable"
+import {
+  useSortable,
+  SortableContext,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { useDroppable } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -31,24 +36,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { MessageTypeSelect } from "@/components/test-builder/message-type-select"
-import { ExpectedMessageFields } from "@/components/test-builder/expected-message-fields"
 import { MessagePreview } from "@/components/test-builder/message-preview"
+import { ExpectedMessageRow } from "@/components/test-builder/expected-message-row"
+import { emptyExpectedMessage } from "@/lib/message-format"
+import { readExpectedMessageClipboard } from "@/lib/message-clipboard"
 import {
-  emptyExpectedMessage,
-  formatExpectedMessage,
-} from "@/lib/message-format"
+  conditionUsesValue,
+  VARIABLE_CONDITION_LABELS,
+} from "@/lib/variable-assert"
 import { cn } from "@/lib/utils"
 import type { ExpectedMessage, ExpectedMessageType, Step } from "@/types/test"
 import type { StepResult } from "@/types/run"
 import { RunStatusBadge } from "@/components/test-runner/run-status-badge"
 import { ScoreBar } from "@/components/test-runner/score-bar"
-
-const EXPECTED_OUTPUT_TYPES: ExpectedMessageType[] = [
-  "text",
-  "quickReply",
-  "menu",
-  "cta",
-]
 
 interface StepItemProps {
   testId: string
@@ -56,6 +56,8 @@ interface StepItemProps {
   stepResult?: StepResult
   defaultThreshold?: number
   defaultTimeoutMs?: number
+  isSelected: boolean
+  onSelect: () => void
   onUpdate: (
     testId: string,
     stepId: string,
@@ -70,24 +72,88 @@ export function StepItem({
   stepResult,
   defaultThreshold = 0.75,
   defaultTimeoutMs = 10000,
+  isSelected,
+  onSelect,
   onUpdate,
   onDelete,
 }: StepItemProps) {
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState(step.name)
   const [expanded, setExpanded] = useState(true)
+  const [contentAnimating, setContentAnimating] = useState(false)
   const [stepConfigOpen, setStepConfigOpen] = useState(false)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [openMessageConfigIndex, setOpenMessageConfigIndex] = useState<
     number | null
   >(null)
 
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: step.id })
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: step.id, data: { type: "step", stepId: step.id } })
   const dndStyle = {
     transform: CSS.Transform.toString(transform),
     transition,
   }
+
+  // Dragging an expanded step fights the CollapsibleContent height
+  // animation against dnd-kit's transform, breaking the layout — force an
+  // instant collapse for the duration of the drag and restore afterward.
+  // Adjusted during render (not an effect) since it's state derived from a
+  // prop change, not a sync with an external system.
+  const [prevIsDragging, setPrevIsDragging] = useState(isDragging)
+  const [wasExpandedBeforeDrag, setWasExpandedBeforeDrag] = useState(false)
+  if (isDragging !== prevIsDragging) {
+    setPrevIsDragging(isDragging)
+    if (isDragging) {
+      setWasExpandedBeforeDrag(expanded)
+      if (expanded) {
+        setContentAnimating(false)
+        setExpanded(false)
+      }
+    } else if (wasExpandedBeforeDrag) {
+      setExpanded(true)
+    }
+  }
+
+  const { setNodeRef: setDropRef } = useDroppable({
+    id: `dropzone-${step.id}`,
+    data: { type: "step", stepId: step.id },
+  })
+
+  // Paste (Ctrl+V / Cmd+V) targets whichever step is currently selected —
+  // only wired up while this step is the selected one, and ignored while
+  // the user is typing into an input/textarea.
+  useEffect(() => {
+    if (!isSelected) return
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "v") return
+      const target = e.target as HTMLElement
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return
+      }
+      const clipboardMessage = readExpectedMessageClipboard()
+      if (!clipboardMessage) return
+      e.preventDefault()
+      onUpdate(testId, step.id, {
+        expectedOutput: [
+          ...step.expectedOutput,
+          { ...clipboardMessage, id: crypto.randomUUID() },
+        ],
+      })
+      setExpanded(true)
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [isSelected, step.expectedOutput, testId, step.id, onUpdate])
 
   const hasCustomThreshold = step.similarityThreshold !== undefined
   const threshold = step.similarityThreshold ?? defaultThreshold
@@ -95,12 +161,15 @@ export function StepItem({
   const stepTimeoutMs = step.timeoutMs ?? defaultTimeoutMs
 
   const activeMessageIndex = openMessageConfigIndex ?? 0
+  // A step can transiently hold zero messages right after a message is
+  // dragged out of it (before a new one is added or dropped in), so this
+  // may be undefined.
   const activeMessage = step.expectedOutput[activeMessageIndex]
   const hasActiveMessageThreshold =
-    activeMessage.similarityThreshold !== undefined
-  const activeMessageThreshold = activeMessage.similarityThreshold ?? threshold
-  const hasActiveMessageTimeout = activeMessage.timeoutMs !== undefined
-  const activeMessageTimeoutMs = activeMessage.timeoutMs ?? stepTimeoutMs
+    activeMessage?.similarityThreshold !== undefined
+  const activeMessageThreshold = activeMessage?.similarityThreshold ?? threshold
+  const hasActiveMessageTimeout = activeMessage?.timeoutMs !== undefined
+  const activeMessageTimeoutMs = activeMessage?.timeoutMs ?? stepTimeoutMs
 
   const handleSaveName = () => {
     if (name.trim()) {
@@ -126,7 +195,18 @@ export function StepItem({
     index: number,
     type: ExpectedMessageType
   ) => {
-    updateExpectedOutput(index, emptyExpectedMessage(type))
+    // Swap the type-specific payload but keep everything that isn't about
+    // the type — the sortable id, the overrides, and the variable tab's
+    // assertions — so switching type never silently drops them.
+    const previous = step.expectedOutput[index]
+    updateExpectedOutput(index, {
+      ...emptyExpectedMessage(type),
+      id: previous.id,
+      similarityThreshold: previous.similarityThreshold,
+      timeoutMs: previous.timeoutMs,
+      assert: previous.assert,
+      variableAssertions: previous.variableAssertions,
+    })
   }
 
   const setExpectedOutputThreshold = (
@@ -163,14 +243,41 @@ export function StepItem({
     })
   }
 
+  const getBorderStyle = () => {
+    if (!stepResult) return ""
+    switch (stepResult.status) {
+      case "running":
+        return "border-green-500 animate-[pulse_1.5s_cubic-bezier(0.4,0,0.6,1)_infinite]"
+      case "passed":
+        return "border-green-500"
+      case "failed":
+      case "timeout":
+        return "border-red-500"
+      default:
+        return ""
+    }
+  }
+
   return (
     <div
       ref={setNodeRef}
       style={dndStyle}
-      className="group/step rounded-xl border p-4 ring-1 ring-foreground/5"
+      onClick={onSelect}
+      className={cn(
+        "group/step rounded-xl border p-4 ring-1 ring-foreground/5",
+        getBorderStyle(),
+        isDragging && "opacity-60",
+        isSelected && "ring-2 ring-primary"
+      )}
     >
-      <Collapsible open={expanded} onOpenChange={setExpanded}>
-        <div className="mb-3 flex items-center justify-between">
+      <Collapsible
+        open={expanded}
+        onOpenChange={(open) => {
+          setExpanded(open)
+          setContentAnimating(true)
+        }}
+      >
+        <div className={cn("flex items-center justify-between")}>
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"
@@ -182,7 +289,11 @@ export function StepItem({
               <GripVertical />
             </Button>
             <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button
+                variant={expanded ? "secondary" : "ghost"}
+                size="icon"
+                className="transition-colors"
+              >
                 <ChevronDownIcon
                   className={cn(
                     "transition-transform",
@@ -251,105 +362,77 @@ export function StepItem({
           </div>
         </div>
 
-        <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="self-start">
-              <div className="mb-1 flex items-center justify-between">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Input
-                </label>
-                <MessageTypeSelect
-                  value="text"
-                  types={["text"]}
-                  onChange={() => {}}
+        <CollapsibleContent
+          className={cn(
+            "data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down",
+            contentAnimating && "overflow-hidden"
+          )}
+          onAnimationEnd={(e) => {
+            if (e.target === e.currentTarget) setContentAnimating(false)
+          }}
+        >
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="">
+              <div className="sticky top-16">
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Input
+                  </label>
+                  <MessageTypeSelect
+                    value="text"
+                    types={["text"]}
+                    onChange={() => {}}
+                  />
+                </div>
+                <Textarea
+                  value={step.input.text}
+                  onChange={(e) =>
+                    onUpdate(testId, step.id, {
+                      input: { type: "text", text: e.target.value },
+                    })
+                  }
+                  placeholder="Message to send..."
+                  className="min-h-24"
                 />
               </div>
-              <Textarea
-                value={step.input.text}
-                onChange={(e) =>
-                  onUpdate(testId, step.id, {
-                    input: { type: "text", text: e.target.value },
-                  })
-                }
-                placeholder="Message to send..."
-                className="min-h-24"
-              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 Expected Output
               </label>
-              <div className="flex flex-col gap-2">
-                {step.expectedOutput.map((message, index) => {
-                  const hasCustomMessageThreshold =
-                    message.similarityThreshold !== undefined
-                  const hasCustomMessageTimeout =
-                    message.timeoutMs !== undefined
-
-                  return (
-                    <div key={index} className="rounded-lg border p-2">
-                      <div className="mb-2 flex items-center gap-2">
-                        <MessageTypeSelect
-                          value={message.type}
-                          types={EXPECTED_OUTPUT_TYPES}
-                          onChange={(type) =>
-                            changeExpectedOutputType(index, type)
-                          }
-                        />
-                        <Button
-                          variant={
-                            hasCustomMessageThreshold || hasCustomMessageTimeout
-                              ? "secondary"
-                              : "ghost"
-                          }
-                          size="icon"
-                          onClick={() => setOpenMessageConfigIndex(index)}
-                        >
-                          <SettingsIcon />
-                        </Button>
-                        <div className="flex-1" />
-                        {step.expectedOutput.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={() => removeExpectedOutput(index)}
-                          >
-                            <XIcon />
-                          </Button>
-                        )}
-                      </div>
-                      <ExpectedMessageFields
-                        message={message}
-                        onChange={(updated) =>
-                          updateExpectedOutput(index, updated)
-                        }
-                        textPlaceholder={
-                          index === 0
-                            ? "Expected response..."
-                            : "Additional message..."
-                        }
-                      />
-                      <div className="mt-2 border-t pt-2">
-                        <p className="mb-1 text-xs font-medium text-muted-foreground">
-                          Preview
-                        </p>
-                        <MessagePreview
-                          content={formatExpectedMessage(message)}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="self-start"
-                  onClick={addExpectedOutput}
-                >
-                  <PlusIcon />
-                  Add message
-                </Button>
-              </div>
+              <SortableContext
+                items={step.expectedOutput.map((m) => m.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div ref={setDropRef} className="flex flex-col gap-2">
+                  {step.expectedOutput.map((message, index) => (
+                    <ExpectedMessageRow
+                      key={message.id}
+                      stepId={step.id}
+                      message={message}
+                      isFirst={index === 0}
+                      canRemove={step.expectedOutput.length > 1}
+                      onChangeType={(type) =>
+                        changeExpectedOutputType(index, type)
+                      }
+                      onChange={(updated) =>
+                        updateExpectedOutput(index, updated)
+                      }
+                      onConfigOpen={() => setOpenMessageConfigIndex(index)}
+                      onRemove={() => removeExpectedOutput(index)}
+                    />
+                  ))}
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="self-start"
+                    onClick={addExpectedOutput}
+                  >
+                    <PlusIcon />
+                    Add message
+                  </Button>
+                </div>
+              </SortableContext>
             </div>
           </div>
 
@@ -390,6 +473,48 @@ export function StepItem({
                   </Fragment>
                 ))}
               </div>
+              {stepResult.variableResults &&
+                stepResult.variableResults.length > 0 && (
+                  <div className="mt-3">
+                    <label className="mb-2 block text-xs font-medium text-muted-foreground">
+                      Variables
+                    </label>
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-x-3 gap-y-2">
+                      {stepResult.variableResults.map((result, index) => (
+                        <Fragment key={index}>
+                          <p className="min-w-0 text-xs wrap-break-word">
+                            <span className="font-medium">{result.name}</span>{" "}
+                            <span className="text-muted-foreground">
+                              {VARIABLE_CONDITION_LABELS[result.condition]}
+                            </span>
+                            {conditionUsesValue(result.condition) && (
+                              <> {result.value}</>
+                            )}
+                          </p>
+                          <span
+                            className={cn(
+                              "justify-self-center text-xs font-medium",
+                              result.passed
+                                ? "text-green-600 dark:text-green-500"
+                                : "text-destructive"
+                            )}
+                          >
+                            {result.passed ? "pass" : "fail"}
+                          </span>
+                          {result.actual === null ? (
+                            <span className="text-xs text-muted-foreground">
+                              not set
+                            </span>
+                          ) : (
+                            <p className="min-w-0 text-xs wrap-break-word">
+                              {result.actual}
+                            </p>
+                          )}
+                        </Fragment>
+                      ))}
+                    </div>
+                  </div>
+                )}
             </div>
           )}
         </CollapsibleContent>
@@ -563,8 +688,8 @@ export function StepItem({
             <DialogTitle>Delete Step</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Are you sure you want to delete "{step.name}"? This action cannot
-            be undone.
+            Are you sure you want to delete "{step.name}"? This action cannot be
+            undone.
           </p>
           <DialogFooter>
             <DialogClose asChild>

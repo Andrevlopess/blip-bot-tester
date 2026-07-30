@@ -7,6 +7,7 @@ export interface BlipBucketConfig {
 export interface DebugConnectionConfig {
   tenant: string
   botIdentifier: string
+  routerKey?: string
 }
 
 export interface AppSettings {

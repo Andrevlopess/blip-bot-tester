@@ -3,6 +3,7 @@ import type { UnitTest, Step } from "@/types/test"
 import { TestsContext } from "@/store/tests-context"
 import { useSettings } from "@/store/settings-context"
 import { emptyExpectedMessage, emptyInputMessage } from "@/lib/message-format"
+import { normalizeTests } from "@/lib/normalize-tests"
 
 const DEFAULT_DOCUMENT_ID = "chatbot-tester-tests"
 const SAVE_DEBOUNCE_MS = 800
@@ -18,7 +19,13 @@ const MOCK_TESTS: UnitTest[] = [
         name: "Basic greeting",
         input: { type: "text", text: "Hello!" },
         expectedOutput: [
-          { type: "text", text: "Hi there! How can I help you today?" },
+          {
+            id: "msg-s1-1",
+            type: "text",
+            text: "Hi there! How can I help you today?",
+            similarityThreshold: 0.85,
+            timeoutMs: 8000,
+          },
         ],
       },
       {
@@ -26,7 +33,12 @@ const MOCK_TESTS: UnitTest[] = [
         name: "Formal greeting",
         input: { type: "text", text: "Good morning" },
         expectedOutput: [
-          { type: "text", text: "Good morning! How may I assist you?" },
+          {
+            id: "msg-s2-1",
+            type: "text",
+            text: "Good morning! How may I assist you?",
+            similarityThreshold: 0.9,
+          },
         ],
       },
     ],
@@ -41,7 +53,11 @@ const MOCK_TESTS: UnitTest[] = [
         name: "Business hours",
         input: { type: "text", text: "What are your business hours?" },
         expectedOutput: [
-          { type: "text", text: "We are open Monday to Friday, 9am to 6pm." },
+          {
+            id: "msg-s3-1",
+            type: "text",
+            text: "We are open Monday to Friday, 9am to 6pm.",
+          },
         ],
       },
       {
@@ -50,6 +66,7 @@ const MOCK_TESTS: UnitTest[] = [
         input: { type: "text", text: "How can I contact support?" },
         expectedOutput: [
           {
+            id: "msg-s4-1",
             type: "text",
             text: "You can reach us at support@example.com or call 1-800-555-0123.",
           },
@@ -60,8 +77,13 @@ const MOCK_TESTS: UnitTest[] = [
         name: "Pricing question",
         input: { type: "text", text: "How much does it cost?" },
         expectedOutput: [
-          { type: "text", text: "Our plans start at $9.99/month." },
           {
+            id: "msg-s5-1",
+            type: "text",
+            text: "Our plans start at $9.99/month.",
+          },
+          {
+            id: "msg-s5-2",
             type: "quickReply",
             text: "Want to see the full plan comparison?",
             options: [
@@ -77,7 +99,9 @@ const MOCK_TESTS: UnitTest[] = [
 
 export function TestsProvider({ children }: { children: ReactNode }) {
   const { settings, bucketClient } = useSettings()
-  const [tests, setTests] = useState<UnitTest[]>(MOCK_TESTS)
+  const [tests, setTests] = useState<UnitTest[]>(() =>
+    normalizeTests(MOCK_TESTS)
+  )
   // Tracks status while a bucket connection is active; when there's no
   // bucketClient, `syncStatus` below is derived as "local-only" directly
   // (no effect needed for that case).
@@ -116,7 +140,7 @@ export function TestsProvider({ children }: { children: ReactNode }) {
       .then(async (remoteTests) => {
         if (cancelled) return
         if (remoteTests) {
-          setTests(remoteTests)
+          setTests(normalizeTests(remoteTests))
         } else {
           await bucketClient.set(documentId, tests)
           if (cancelled) return
@@ -169,13 +193,40 @@ export function TestsProvider({ children }: { children: ReactNode }) {
 
   const updateTest = (
     id: string,
-    data: Partial<Pick<UnitTest, "name" | "timeoutMs" | "similarityThreshold">>
+    data: Partial<
+      Pick<UnitTest, "name" | "timeoutMs" | "similarityThreshold" | "variables">
+    >
   ) => {
     setTests((prev) => prev.map((t) => (t.id === id ? { ...t, ...data } : t)))
   }
 
   const deleteTest = (id: string) => {
     setTests((prev) => prev.filter((t) => t.id !== id))
+  }
+
+  const duplicateTest = (id: string): string | undefined => {
+    const source = tests.find((t) => t.id === id)
+    if (!source) return undefined
+    const newId = crypto.randomUUID()
+    const duplicate: UnitTest = {
+      ...source,
+      id: newId,
+      name: `${source.name} - copy`,
+      createdAt: new Date().toISOString(),
+      steps: source.steps.map((s) => ({
+        ...s,
+        id: crypto.randomUUID(),
+        expectedOutput: s.expectedOutput.map((m) => ({
+          ...m,
+          id: crypto.randomUUID(),
+        })),
+      })),
+    }
+    setTests((prev) => {
+      const index = prev.findIndex((t) => t.id === id)
+      return [...prev.slice(0, index + 1), duplicate, ...prev.slice(index + 1)]
+    })
+    return newId
   }
 
   const getTest = (id: string) => tests.find((t) => t.id === id)
@@ -239,6 +290,55 @@ export function TestsProvider({ children }: { children: ReactNode }) {
     )
   }
 
+  const moveExpectedMessage = (
+    testId: string,
+    fromStepId: string,
+    toStepId: string,
+    messageId: string,
+    toIndex: number
+  ) => {
+    setTests((prev) =>
+      prev.map((t) => {
+        if (t.id !== testId) return t
+        const fromStep = t.steps.find((s) => s.id === fromStepId)
+        const message = fromStep?.expectedOutput.find((m) => m.id === messageId)
+        if (!fromStep || !message) return t
+        return {
+          ...t,
+          steps: t.steps.map((s) => {
+            if (s.id === fromStepId && s.id === toStepId) {
+              const withoutMoved = s.expectedOutput.filter(
+                (m) => m.id !== messageId
+              )
+              const clampedIndex = Math.max(
+                0,
+                Math.min(toIndex, withoutMoved.length)
+              )
+              const next = [...withoutMoved]
+              next.splice(clampedIndex, 0, message)
+              return { ...s, expectedOutput: next }
+            }
+            if (s.id === fromStepId) {
+              return {
+                ...s,
+                expectedOutput: s.expectedOutput.filter(
+                  (m) => m.id !== messageId
+                ),
+              }
+            }
+            if (s.id === toStepId) {
+              const next = [...s.expectedOutput]
+              const clampedIndex = Math.max(0, Math.min(toIndex, next.length))
+              next.splice(clampedIndex, 0, message)
+              return { ...s, expectedOutput: next }
+            }
+            return s
+          }),
+        }
+      })
+    )
+  }
+
   return (
     <TestsContext.Provider
       value={{
@@ -247,11 +347,13 @@ export function TestsProvider({ children }: { children: ReactNode }) {
         addTest,
         updateTest,
         deleteTest,
+        duplicateTest,
         getTest,
         addStep,
         updateStep,
         deleteStep,
         reorderSteps,
+        moveExpectedMessage,
       }}
     >
       {children}

@@ -8,6 +8,9 @@ export interface RunContextValue {
   startRun: (tests: UnitTest[]) => Promise<void>
   cancelRun: (testId: string) => void
   clearRun: (testId: string) => void
+  pauseRun: (testId: string) => void
+  resumeRun: (testId: string) => void
+  discardRun: (testId: string) => void
 }
 
 export const RunContext = createContext<RunContextValue | null>(null)

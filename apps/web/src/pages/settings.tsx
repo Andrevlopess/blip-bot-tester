@@ -42,18 +42,24 @@ export function SettingsPage() {
   const [botIdentifier, setBotIdentifier] = useState(
     settings.debugConnection?.botIdentifier ?? ""
   )
+  const [routerKey, setRouterKey] = useState(
+    settings.debugConnection?.routerKey ?? ""
+  )
+  const [showRouterKey, setShowRouterKey] = useState(false)
   const canSaveDebugConnection = tenant.trim() && botIdentifier.trim()
 
   const handleSaveDebugConnection = () => {
     updateDebugConnection({
       tenant: tenant.trim(),
       botIdentifier: botIdentifier.trim(),
+      routerKey: routerKey.trim() || undefined,
     })
   }
 
   const handleDisconnectDebugConnection = () => {
     setTenant("")
     setBotIdentifier("")
+    setRouterKey("")
     updateDebugConnection(null)
   }
 
@@ -223,6 +229,33 @@ export function SettingsPage() {
                 onChange={(e) => setBotIdentifier(e.target.value)}
                 placeholder="e.g. matheusteste6"
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                Router key
+              </label>
+              <div className="flex gap-1">
+                <Input
+                  type={showRouterKey ? "text" : "password"}
+                  value={routerKey}
+                  onChange={(e) => setRouterKey(e.target.value)}
+                  placeholder="Key ..."
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setShowRouterKey((v) => !v)}
+                >
+                  {showRouterKey ? <EyeOffIcon /> : <EyeIcon />}
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Needed only to apply contact variables (name, phone, tax
+                document, extras) before a run — sent as the{" "}
+                <code>Authorization</code> header on a direct Commands API
+                request. Context variables don't need it.
+              </p>
             </div>
 
             <div className="mt-2 flex items-center gap-2">

@@ -1,5 +1,10 @@
-import { NavLink, useLocation } from "react-router"
-import { ClipboardListIcon, FlaskConicalIcon, SettingsIcon } from "lucide-react"
+import { NavLink, useLocation, useNavigate } from "react-router"
+import {
+  ClipboardListIcon,
+  FlaskConicalIcon,
+  PlusIcon,
+  SettingsIcon,
+} from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -14,14 +19,17 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
-
-const navItems = [
-  { title: "My Tests", url: "/", icon: ClipboardListIcon },
-  { title: "Settings", url: "/settings", icon: SettingsIcon },
-]
+import { useTests } from "@/store/tests-context"
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { tests, addTest } = useTests()
+
+  const handleNewTest = () => {
+    const id = addTest()
+    navigate(`/tests/${id}`)
+  }
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -38,30 +46,62 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
       <Separator />
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.url}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location.pathname === item.url}
-                  >
-                    <NavLink to={item.url}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={handleNewTest}>
+                  <PlusIcon />
+                  <span>New test</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={location.pathname === "/"}>
+                  <NavLink to="/">
+                    <ClipboardListIcon />
+                    <span>All tests</span>
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {tests.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Tests</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {tests.map((test) => (
+                  <SidebarMenuItem key={test.id}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={location.pathname === `/tests/${test.id}`}
+                    >
+                      <NavLink to={`/tests/${test.id}`}>
+                        <span className="truncate">{test.name}</span>
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter className="p-3">
-        <p className="truncate text-xs text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden">
-          Unit Test Builder
-        </p>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={location.pathname === "/settings"}
+            >
+              <NavLink to="/settings">
+                <SettingsIcon />
+                <span>Settings</span>
+              </NavLink>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

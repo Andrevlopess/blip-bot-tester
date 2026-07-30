@@ -10,9 +10,12 @@ export interface TestsContextValue {
   addTest: () => string
   updateTest: (
     id: string,
-    data: Partial<Pick<UnitTest, "name" | "timeoutMs" | "similarityThreshold">>
+    data: Partial<
+      Pick<UnitTest, "name" | "timeoutMs" | "similarityThreshold" | "variables">
+    >
   ) => void
   deleteTest: (id: string) => void
+  duplicateTest: (id: string) => string | undefined
   getTest: (id: string) => UnitTest | undefined
   addStep: (testId: string) => void
   updateStep: (
@@ -22,6 +25,13 @@ export interface TestsContextValue {
   ) => void
   deleteStep: (testId: string, stepId: string) => void
   reorderSteps: (testId: string, orderedStepIds: string[]) => void
+  moveExpectedMessage: (
+    testId: string,
+    fromStepId: string,
+    toStepId: string,
+    messageId: string,
+    toIndex: number
+  ) => void
 }
 
 export const TestsContext = createContext<TestsContextValue | null>(null)
