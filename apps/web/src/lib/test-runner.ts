@@ -121,9 +121,11 @@ async function runStep(
       clearTimeout(graceTimer)
       if (expectedCount === 0) {
         // A step that only asserts on variables declares no opinion about
-        // what the bot says, so extra chatter must not fail it — just wait
-        // for the bot to go quiet, then read the variables.
-        graceTimer = setTimeout(finish, EXTRA_MESSAGE_GRACE_MS)
+        // what the bot says, so extra chatter must not fail it. But the bot
+        // may still be mid-conversation, so wait as long as any other step
+        // would between messages (not just the short extra-message grace
+        // period) before treating it as settled and reading the variables.
+        graceTimer = setTimeout(finish, stepTimeoutMs)
       } else if (received.length === expectedCount) {
         // Got everything expected — don't resolve yet. Wait a grace period
         // to make sure the bot doesn't keep talking beyond what was asked.
@@ -177,11 +179,17 @@ async function runStep(
       ? "timeout"
       : "failed"
 
+  // A variable-only step never scores anything the bot said, so `messages`
+  // stays empty — surface whatever actually arrived separately instead of
+  // dropping it on the floor.
+  const receivedMessages = expectedCount === 0 ? collected : undefined
+
   return {
     stepId: step.id,
     status,
     messages: [...messages, ...extraMessages],
     variableResults,
+    receivedMessages,
     averageScore,
     startedAt,
     finishedAt: new Date().toISOString(),

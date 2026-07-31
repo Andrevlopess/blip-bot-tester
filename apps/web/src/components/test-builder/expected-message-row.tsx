@@ -69,6 +69,7 @@ export function ExpectedMessageRow({
   const isMessageTab = assert === "message"
   const hasCustomThreshold = message.similarityThreshold !== undefined
   const hasCustomTimeout = message.timeoutMs !== undefined
+  const assertionCount = message.variableAssertions?.length ?? 0
 
   const handleCopy = () => {
     copyExpectedMessage(message)
@@ -103,7 +104,14 @@ export function ExpectedMessageRow({
           </Button>
           <TabsList variant="line">
             <TabsTrigger value="message">Message</TabsTrigger>
-            <TabsTrigger value="variable">Variable</TabsTrigger>
+            <TabsTrigger value="variable">
+              Variable
+              {assertionCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-green-500 px-0.5 text-[9px] leading-none font-medium text-white">
+                  {assertionCount}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
           {/* Type, threshold and timeout only describe a message check —
               a variable assertion has no use for any of them. */}

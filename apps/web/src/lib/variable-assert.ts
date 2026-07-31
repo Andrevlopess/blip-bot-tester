@@ -24,6 +24,17 @@ export function conditionUsesValue(condition: VariableCondition): boolean {
   return condition !== "exists" && condition !== "notExists"
 }
 
+// Best-effort pretty-print for display only — evaluateAssertion() never uses
+// this, so it has no bearing on pass/fail, only on how the raw value reads in
+// the UI. Falls back to the raw string when it isn't valid JSON.
+export function formatVariableValueForDisplay(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2)
+  } catch {
+    return value
+  }
+}
+
 // `actual` is the raw context resource as returned by the Commands API, or
 // null when the variable is not set. Comparison is raw: no trimming, no case
 // folding, no JSON traversal. A missing variable fails every condition except

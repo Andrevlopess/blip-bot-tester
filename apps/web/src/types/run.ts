@@ -25,6 +25,11 @@ export interface StepResult {
   status: StepRunStatus
   messages: MessageScore[]
   variableResults?: VariableAssertionResult[]
+  // Whatever the bot actually said during a step with zero message
+  // expectations (variable assertions only). Not scored against anything —
+  // there's nothing to compare it to — but still worth surfacing next to the
+  // variable results instead of silently discarding it.
+  receivedMessages?: string[]
   // Averaged over `messages` only — variable assertions are pass/fail and
   // carry no similarity score.
   averageScore: number

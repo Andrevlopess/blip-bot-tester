@@ -1,14 +1,5 @@
-import { Fragment, useEffect, useState } from "react"
-import {
-  TrashIcon,
-  PencilIcon,
-  CheckIcon,
-  XIcon,
-  PlusIcon,
-  SettingsIcon,
-  GripVertical,
-  ChevronDownIcon,
-} from "lucide-react"
+import { useEffect, useState } from "react"
+import { PlusIcon } from "lucide-react"
 import {
   useSortable,
   SortableContext,
@@ -17,38 +8,19 @@ import {
 import { useDroppable } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { MessageTypeSelect } from "@/components/test-builder/message-type-select"
-import { MessagePreview } from "@/components/test-builder/message-preview"
 import { ExpectedMessageRow } from "@/components/test-builder/expected-message-row"
+import { StepHeader } from "@/components/test-builder/step-header"
+import { StepResultPanel } from "@/components/test-builder/step-result-panel"
+import { ThresholdTimeoutDialog } from "@/components/test-builder/threshold-timeout-dialog"
+import { ConfirmDeleteDialog } from "@/components/test-builder/confirm-delete-dialog"
 import { emptyExpectedMessage } from "@/lib/message-format"
 import { readExpectedMessageClipboard } from "@/lib/message-clipboard"
-import {
-  conditionUsesValue,
-  VARIABLE_CONDITION_LABELS,
-} from "@/lib/variable-assert"
 import { cn } from "@/lib/utils"
 import type { ExpectedMessage, ExpectedMessageType, Step } from "@/types/test"
 import type { StepResult } from "@/types/run"
-import { RunStatusBadge } from "@/components/test-runner/run-status-badge"
-import { ScoreBar } from "@/components/test-runner/score-bar"
 
 interface StepItemProps {
   testId: string
@@ -77,8 +49,6 @@ export function StepItem({
   onUpdate,
   onDelete,
 }: StepItemProps) {
-  const [editingName, setEditingName] = useState(false)
-  const [name, setName] = useState(step.name)
   const [expanded, setExpanded] = useState(true)
   const [contentAnimating, setContentAnimating] = useState(false)
   const [stepConfigOpen, setStepConfigOpen] = useState(false)
@@ -170,20 +140,6 @@ export function StepItem({
   const activeMessageThreshold = activeMessage?.similarityThreshold ?? threshold
   const hasActiveMessageTimeout = activeMessage?.timeoutMs !== undefined
   const activeMessageTimeoutMs = activeMessage?.timeoutMs ?? stepTimeoutMs
-
-  const handleSaveName = () => {
-    if (name.trim()) {
-      onUpdate(testId, step.id, { name: name.trim() })
-    } else {
-      setName(step.name)
-    }
-    setEditingName(false)
-  }
-
-  const handleCancelName = () => {
-    setName(step.name)
-    setEditingName(false)
-  }
 
   const updateExpectedOutput = (index: number, message: ExpectedMessage) => {
     const updated = [...step.expectedOutput]
@@ -277,90 +233,17 @@ export function StepItem({
           setContentAnimating(true)
         }}
       >
-        <div className={cn("flex items-center justify-between")}>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="cursor-grab opacity-0 group-hover/step:opacity-100 focus-visible:opacity-100"
-              {...attributes}
-              {...listeners}
-            >
-              <GripVertical />
-            </Button>
-            <CollapsibleTrigger asChild>
-              <Button
-                variant={expanded ? "secondary" : "ghost"}
-                size="icon"
-                className="transition-colors"
-              >
-                <ChevronDownIcon
-                  className={cn(
-                    "transition-transform",
-                    expanded && "rotate-180"
-                  )}
-                />
-              </Button>
-            </CollapsibleTrigger>
-            {editingName ? (
-              <div className="flex items-center gap-1">
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSaveName()
-                    if (e.key === "Escape") handleCancelName()
-                  }}
-                  autoFocus
-                  className="h-auto max-w-xs border-0 px-0 font-medium shadow-none focus-visible:ring-0"
-                  placeholder="Step name"
-                />
-                <Button variant="ghost" size="icon-xs" onClick={handleSaveName}>
-                  <CheckIcon />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={handleCancelName}
-                >
-                  <XIcon />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1">
-                <span className="font-medium">{step.name}</span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => setEditingName(true)}
-                >
-                  <PencilIcon />
-                </Button>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <RunStatusBadge status={stepResult?.status} />
-            <Button
-              variant={
-                hasCustomThreshold || hasCustomStepTimeout
-                  ? "secondary"
-                  : "ghost"
-              }
-              size="icon"
-              onClick={() => setStepConfigOpen(true)}
-            >
-              <SettingsIcon />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setConfirmDeleteOpen(true)}
-            >
-              <TrashIcon />
-            </Button>
-          </div>
-        </div>
+        <StepHeader
+          step={step}
+          expanded={expanded}
+          dragHandleProps={{ attributes, listeners }}
+          stepResult={stepResult}
+          hasCustomThreshold={hasCustomThreshold}
+          hasCustomStepTimeout={hasCustomStepTimeout}
+          onRename={(name) => onUpdate(testId, step.id, { name })}
+          onOpenSettings={() => setStepConfigOpen(true)}
+          onOpenDelete={() => setConfirmDeleteOpen(true)}
+        />
 
         <CollapsibleContent
           className={cn(
@@ -371,8 +254,8 @@ export function StepItem({
             if (e.target === e.currentTarget) setContentAnimating(false)
           }}
         >
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="">
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            <div className="col-span-1">
               <div className="sticky top-16">
                 <div className="mb-1 flex items-center justify-between">
                   <label className="text-xs font-medium text-muted-foreground">
@@ -396,7 +279,7 @@ export function StepItem({
                 />
               </div>
             </div>
-            <div>
+            <div className="col-span-2">
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 Expected Output
               </label>
@@ -436,277 +319,75 @@ export function StepItem({
             </div>
           </div>
 
-          {stepResult && (
-            <div className="mt-3 border-t pt-3">
-              <label className="mb-2 block text-xs font-medium text-muted-foreground">
-                Result
-              </label>
-              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-x-3 gap-y-2">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Expected
-                </p>
-                <span />
-                <p className="text-xs font-medium text-muted-foreground">
-                  Actual
-                </p>
-                {stepResult.messages.map((message, index) => (
-                  <Fragment key={index}>
-                    <MessagePreview
-                      content={message.expected}
-                      className="min-w-0"
-                    />
-                    <ScoreBar
-                      score={message.score}
-                      threshold={message.threshold}
-                      className="justify-self-center"
-                    />
-                    {message.actual === null ? (
-                      <span className="text-xs text-destructive">
-                        No reply received (timeout)
-                      </span>
-                    ) : (
-                      <MessagePreview
-                        content={message.actual}
-                        className="min-w-0"
-                      />
-                    )}
-                  </Fragment>
-                ))}
-              </div>
-              {stepResult.variableResults &&
-                stepResult.variableResults.length > 0 && (
-                  <div className="mt-3">
-                    <label className="mb-2 block text-xs font-medium text-muted-foreground">
-                      Variables
-                    </label>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-x-3 gap-y-2">
-                      {stepResult.variableResults.map((result, index) => (
-                        <Fragment key={index}>
-                          <p className="min-w-0 text-xs wrap-break-word">
-                            <span className="font-medium">{result.name}</span>{" "}
-                            <span className="text-muted-foreground">
-                              {VARIABLE_CONDITION_LABELS[result.condition]}
-                            </span>
-                            {conditionUsesValue(result.condition) && (
-                              <> {result.value}</>
-                            )}
-                          </p>
-                          <span
-                            className={cn(
-                              "justify-self-center text-xs font-medium",
-                              result.passed
-                                ? "text-green-600 dark:text-green-500"
-                                : "text-destructive"
-                            )}
-                          >
-                            {result.passed ? "pass" : "fail"}
-                          </span>
-                          {result.actual === null ? (
-                            <span className="text-xs text-muted-foreground">
-                              not set
-                            </span>
-                          ) : (
-                            <p className="min-w-0 text-xs wrap-break-word">
-                              {result.actual}
-                            </p>
-                          )}
-                        </Fragment>
-                      ))}
-                    </div>
-                  </div>
-                )}
-            </div>
-          )}
+          {stepResult && <StepResultPanel stepResult={stepResult} />}
         </CollapsibleContent>
       </Collapsible>
 
-      <Dialog open={stepConfigOpen} onOpenChange={setStepConfigOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Step settings</DialogTitle>
-            <DialogDescription>
-              Override the test's threshold and timeout for this step only.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-4">
-            <div>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={hasCustomThreshold}
-                  onCheckedChange={(checked) =>
-                    onUpdate(testId, step.id, {
-                      similarityThreshold: checked
-                        ? defaultThreshold
-                        : undefined,
-                    })
-                  }
-                />
-                Custom threshold
-              </label>
-              {hasCustomThreshold && (
-                <div className="mt-2 flex items-center gap-2 pl-6">
-                  <Slider
-                    className="max-w-48"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={[threshold]}
-                    onValueChange={([value]) =>
-                      onUpdate(testId, step.id, { similarityThreshold: value })
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {Math.round(threshold * 100)}%
-                  </span>
-                </div>
-              )}
-            </div>
-            <div>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={hasCustomStepTimeout}
-                  onCheckedChange={(checked) =>
-                    onUpdate(testId, step.id, {
-                      timeoutMs: checked ? stepTimeoutMs : undefined,
-                    })
-                  }
-                />
-                Custom timeout
-              </label>
-              {hasCustomStepTimeout && (
-                <div className="mt-2 flex items-center gap-1 pl-6">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={Math.round(stepTimeoutMs / 1000)}
-                    onChange={(e) => {
-                      const seconds = Math.min(
-                        60,
-                        Math.max(1, Number(e.target.value) || 1)
-                      )
-                      onUpdate(testId, step.id, { timeoutMs: seconds * 1000 })
-                    }}
-                    className="h-8 w-16"
-                  />
-                  <span className="text-xs text-muted-foreground">s</span>
-                </div>
-              )}
-            </div>
-          </div>
-          <DialogFooter showCloseButton />
-        </DialogContent>
-      </Dialog>
+      <ThresholdTimeoutDialog
+        open={stepConfigOpen}
+        onOpenChange={setStepConfigOpen}
+        title="Step settings"
+        description="Override the test's threshold and timeout for this step only."
+        thresholdEnabled={hasCustomThreshold}
+        threshold={threshold}
+        onThresholdEnabledChange={(enabled) =>
+          onUpdate(testId, step.id, {
+            similarityThreshold: enabled ? defaultThreshold : undefined,
+          })
+        }
+        onThresholdChange={(value) =>
+          onUpdate(testId, step.id, { similarityThreshold: value })
+        }
+        timeoutEnabled={hasCustomStepTimeout}
+        timeoutMs={stepTimeoutMs}
+        onTimeoutEnabledChange={(enabled) =>
+          onUpdate(testId, step.id, {
+            timeoutMs: enabled ? stepTimeoutMs : undefined,
+          })
+        }
+        onTimeoutChange={(ms) => onUpdate(testId, step.id, { timeoutMs: ms })}
+      />
 
-      <Dialog
+      <ThresholdTimeoutDialog
+        key={activeMessageIndex}
         open={openMessageConfigIndex !== null}
         onOpenChange={(open) => !open && setOpenMessageConfigIndex(null)}
-      >
-        <DialogContent key={activeMessageIndex}>
-          <DialogHeader>
-            <DialogTitle>Message settings</DialogTitle>
-            <DialogDescription>
-              Override the step's threshold and timeout for this message only.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-4">
-            <div>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={hasActiveMessageThreshold}
-                  onCheckedChange={(checked) =>
-                    setExpectedOutputThreshold(
-                      activeMessageIndex,
-                      checked ? threshold : undefined
-                    )
-                  }
-                />
-                Custom threshold
-              </label>
-              {hasActiveMessageThreshold && (
-                <div className="mt-2 flex items-center gap-2 pl-6">
-                  <Slider
-                    className="max-w-48"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={[activeMessageThreshold]}
-                    onValueChange={([value]) =>
-                      setExpectedOutputThreshold(activeMessageIndex, value)
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {Math.round(activeMessageThreshold * 100)}%
-                  </span>
-                </div>
-              )}
-            </div>
-            <div>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={hasActiveMessageTimeout}
-                  onCheckedChange={(checked) =>
-                    setExpectedOutputTimeout(
-                      activeMessageIndex,
-                      checked ? activeMessageTimeoutMs : undefined
-                    )
-                  }
-                />
-                Custom timeout
-              </label>
-              {hasActiveMessageTimeout && (
-                <div className="mt-2 flex items-center gap-1 pl-6">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={Math.round(activeMessageTimeoutMs / 1000)}
-                    onChange={(e) => {
-                      const seconds = Math.min(
-                        60,
-                        Math.max(1, Number(e.target.value) || 1)
-                      )
-                      setExpectedOutputTimeout(
-                        activeMessageIndex,
-                        seconds * 1000
-                      )
-                    }}
-                    className="h-8 w-16"
-                  />
-                  <span className="text-xs text-muted-foreground">s</span>
-                </div>
-              )}
-            </div>
-          </div>
-          <DialogFooter showCloseButton />
-        </DialogContent>
-      </Dialog>
+        title="Message settings"
+        description="Override the step's threshold and timeout for this message only."
+        thresholdEnabled={hasActiveMessageThreshold}
+        threshold={activeMessageThreshold}
+        onThresholdEnabledChange={(enabled) =>
+          setExpectedOutputThreshold(
+            activeMessageIndex,
+            enabled ? threshold : undefined
+          )
+        }
+        onThresholdChange={(value) =>
+          setExpectedOutputThreshold(activeMessageIndex, value)
+        }
+        timeoutEnabled={hasActiveMessageTimeout}
+        timeoutMs={activeMessageTimeoutMs}
+        onTimeoutEnabledChange={(enabled) =>
+          setExpectedOutputTimeout(
+            activeMessageIndex,
+            enabled ? activeMessageTimeoutMs : undefined
+          )
+        }
+        onTimeoutChange={(ms) =>
+          setExpectedOutputTimeout(activeMessageIndex, ms)
+        }
+      />
 
-      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Step</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to delete "{step.name}"? This action cannot be
-            undone.
-          </p>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DialogClose>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                onDelete(testId, step.id)
-                setConfirmDeleteOpen(false)
-              }}
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDeleteDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        itemLabel="Step"
+        itemName={step.name}
+        onConfirm={() => {
+          onDelete(testId, step.id)
+          setConfirmDeleteOpen(false)
+        }}
+      />
     </div>
   )
 }

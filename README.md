@@ -121,7 +121,8 @@ guest visitor account per run.
    trailing message is treated as a mismatch, and the extra messages are shown
    in the results. A step that only has variable assertions is the exception:
    it declares no opinion about what the bot says, so it just waits for the bot
-   to go quiet (5 seconds of silence) and extra replies don't fail it.
+   to go quiet (the step's timeout, not the 5-second grace above) and extra
+   replies don't fail it.
 5. Any variable assertions are checked next, once per distinct variable name,
    with a `get /contexts/<identity>/<name>` command to `postmaster@msging.net`
    over the Commands API — so a Router key is required whenever a test has
